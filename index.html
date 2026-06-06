@@ -1,0 +1,818 @@
+import { useState, useEffect } from "react";
+
+// ── Data ────────────────────────────────────────────────────────────────────
+
+const CHARTS = [
+  {
+    id: "yield_curve",
+    name: "US Yield Curve (2s10s)",
+    category: "Monetary Policy",
+    description: "Spread between 10yr and 2yr Treasury yields. Inversion = recession signal.",
+    link: "https://fred.stlouisfed.org/series/T10Y2Y",
+    assets: ["Bonds", "Equities", "Credit", "Real Assets"],
+    why: "Sets the cost of money for the entire economy. Inversion has preceded every US recession since 1955.",
+    signal: { bearish: "2yr > 10yr (inverted)", bullish: "Curve steepening (10yr rising faster)" },
+    color: "#639922"
+  },
+  {
+    id: "fed_funds",
+    name: "Fed Funds Rate",
+    category: "Monetary Policy",
+    description: "The Federal Reserve's benchmark overnight lending rate.",
+    link: "https://fred.stlouisfed.org/series/FEDFUNDS",
+    assets: ["Equities", "Bonds", "FX", "Real Assets"],
+    why: "The single most powerful lever in global finance. Rate hikes raise discount rates, compressing all asset valuations.",
+    signal: { bearish: "Hiking cycle with tight financial conditions", bullish: "Rate cuts or pivot signals" },
+    color: "#639922"
+  },
+  {
+    id: "real_rates",
+    name: "US Real Interest Rate (TIPS)",
+    category: "Monetary Policy",
+    description: "10yr TIPS yield — nominal yield minus inflation expectations.",
+    link: "https://fred.stlouisfed.org/series/DFII10",
+    assets: ["Gold", "Commodities", "FX", "Real Assets"],
+    why: "The single most important driver of gold. Negative real rates = gold bullish. Also affects USD direction.",
+    signal: { bearish: "Rising real rates (crushes gold/commodities)", bullish: "Falling or negative real rates" },
+    color: "#639922"
+  },
+  {
+    id: "cpi",
+    name: "CPI / Core PCE Inflation",
+    category: "Inflation & Growth",
+    description: "Consumer price index and the Fed's preferred PCE measure. Released monthly.",
+    link: "https://fred.stlouisfed.org/series/CPIAUCSL",
+    assets: ["Bonds", "Equities", "Commodities"],
+    why: "Drives Fed action. High inflation → rate hikes → bond selloff, growth stock compression. Benefits energy producers.",
+    signal: { bearish: "Hotter than expected = more hikes ahead", bullish: "Cooling inflation = Fed pivot hope" },
+    color: "#D85A30"
+  },
+  {
+    id: "pmi",
+    name: "Global PMI (Mfg + Services)",
+    category: "Inflation & Growth",
+    description: "Purchasing Managers Index above 50 = expansion. One of the best real-time growth indicators.",
+    link: "https://www.spglobal.com/marketintelligence/en/mi/research-analysis/pmi.html",
+    assets: ["Equities", "Commodities", "Credit"],
+    why: "Leads GDP by 1–2 quarters. Watch the direction of change — a PMI declining from 58 to 54 is still expansionary but signaling slowdown.",
+    signal: { bearish: "Sub-50 and falling, especially globally", bullish: "Re-acceleration above 50 from a trough" },
+    color: "#D85A30"
+  },
+  {
+    id: "gdp",
+    name: "US / Global GDP Growth",
+    category: "Inflation & Growth",
+    description: "Quarterly output. Lagging but authoritative. Watch components: consumption, investment, trade.",
+    link: "https://fred.stlouisfed.org/series/GDP",
+    assets: ["Equities", "Bonds", "Commodities"],
+    why: "Confirms what leading indicators already suggested. Recession (2 negative quarters) triggers credit spread blowouts and equity selloffs.",
+    signal: { bearish: "Consecutive negative prints", bullish: "Strong consumer spending growth" },
+    color: "#D85A30"
+  },
+  {
+    id: "credit_spreads",
+    name: "HY & IG Credit Spreads",
+    category: "Credit & Liquidity",
+    description: "Yield premium corporate bonds pay over Treasuries. Bloomberg/ICE indices.",
+    link: "https://fred.stlouisfed.org/series/BAMLH0A0HYM2",
+    assets: ["Credit", "Equities", "Bonds"],
+    why: "Often leads equity markets by weeks. Widening spreads = rising default risk = tightening financial conditions = sell equities.",
+    signal: { bearish: "Spreads widening rapidly (>100bps in weeks)", bullish: "Spreads compressing toward cycle lows" },
+    color: "#D4537E"
+  },
+  {
+    id: "fed_balance",
+    name: "Fed Balance Sheet (QE/QT)",
+    category: "Credit & Liquidity",
+    description: "Total assets on the Fed's balance sheet. QE = expansion, QT = contraction.",
+    link: "https://fred.stlouisfed.org/series/WALCL",
+    assets: ["Equities", "Bonds", "Commodities"],
+    why: "Correlates closely with global equity performance since 2008. Liquidity injection pumps risk assets; QT drains them.",
+    signal: { bearish: "QT in progress (balance sheet shrinking)", bullish: "QE restart or pause in QT" },
+    color: "#D4537E"
+  },
+  {
+    id: "fci",
+    name: "Financial Conditions Index",
+    category: "Credit & Liquidity",
+    description: "Composite of credit spreads, equity vol, lending standards, and FX. Goldman Sachs / Chicago Fed.",
+    link: "https://www.chicagofed.org/publications/nfci/index",
+    assets: ["Equities", "Credit", "FX"],
+    why: "Summarizes how easy or hard it is to borrow and invest. Tightening FCI = less money flowing into risk assets.",
+    signal: { bearish: "Tightening FCI (index rising toward 1+)", bullish: "Loosening FCI approaching 0 or below" },
+    color: "#D4537E"
+  },
+  {
+    id: "dxy",
+    name: "US Dollar Index (DXY)",
+    category: "Currencies",
+    description: "USD vs basket of EUR, JPY, GBP, CAD, SEK, CHF. The global liquidity barometer.",
+    link: "https://www.tradingview.com/symbols/TVC-DXY/",
+    assets: ["Commodities", "FX", "Equities", "EM"],
+    why: "Strong dollar is bearish for commodities (priced in USD) and EM debt. Most important single chart for cross-asset macro.",
+    signal: { bearish: "DXY rising = commodities and EM under pressure", bullish: "DXY weakening = commodities and EM tailwind" },
+    color: "#BA7517"
+  },
+  {
+    id: "cny",
+    name: "Chinese Yuan (CNY/USD)",
+    category: "Currencies",
+    description: "Proxy for Chinese growth expectations and commodity demand.",
+    link: "https://www.tradingview.com/symbols/USDCNH/",
+    assets: ["Commodities", "FX", "Equities"],
+    why: "China consumes ~50% of global copper and iron ore. Yuan weakness = slowing Chinese demand = bearish industrial metals.",
+    signal: { bearish: "Yuan depreciating (USDCNH rising)", bullish: "Yuan strengthening / stimulus announcements" },
+    color: "#BA7517"
+  },
+  {
+    id: "crude",
+    name: "Crude Oil (WTI / Brent)",
+    category: "Commodities",
+    description: "The most geopolitically sensitive commodity and inflation input.",
+    link: "https://www.tradingview.com/symbols/NYMEX-CL1!/",
+    assets: ["Commodities", "Equities", "FX", "Inflation"],
+    why: "Rising oil is inflationary, hurts consumer spending and transport stocks, benefits energy producers. Watch OPEC+ decisions.",
+    signal: { bearish: "Falling oil = demand concern or supply glut", bullish: "Rising oil = supply cuts or demand surge" },
+    color: "#D85A30"
+  },
+  {
+    id: "copper",
+    name: "Copper (Dr. Copper)",
+    category: "Commodities",
+    description: "Used in construction, EVs, and electronics. The most reliable global growth barometer.",
+    link: "https://www.tradingview.com/symbols/COMEX-HG1!/",
+    assets: ["Commodities", "Equities"],
+    why: "Called 'Dr. Copper' because of its economic forecasting ability. Rising copper = global industrial expansion. Often leads equity markets.",
+    signal: { bearish: "Copper falling = global slowdown priced in", bullish: "Copper rising = expansion, bullish for miners" },
+    color: "#D85A30"
+  },
+  {
+    id: "gold",
+    name: "Gold (XAU/USD)",
+    category: "Commodities",
+    description: "Safe haven, real rate hedge, and dollar alternative.",
+    link: "https://www.tradingview.com/symbols/OANDA-XAUUSD/",
+    assets: ["Commodities", "Real Assets", "FX"],
+    why: "Driven by real rates and DXY. Outperforms when institutions lose faith in fiat or when real rates are deeply negative.",
+    signal: { bearish: "Rising real rates + strong dollar", bullish: "Falling real rates + dollar weakness + geopolitical stress" },
+    color: "#D85A30"
+  },
+  {
+    id: "vix",
+    name: "VIX (Fear Index)",
+    category: "Sentiment & Risk",
+    description: "Implied volatility on S&P 500 options over 30 days. Real-money fear gauge.",
+    link: "https://www.tradingview.com/symbols/CBOE-VIX/",
+    assets: ["Equities", "Credit"],
+    why: "Spikes signal panic selling. VIX >30 = opportunity zone (historically). VIX <15 = complacency, potential vulnerability.",
+    signal: { bearish: "VIX spiking above 30 (fear, but often near bottom)", bullish: "VIX <15 = calm (but watch for complacency)" },
+    color: "#378ADD"
+  },
+  {
+    id: "sp500",
+    name: "S&P 500",
+    category: "Sentiment & Risk",
+    description: "The global benchmark for risk appetite. Everything correlates to this in a crisis.",
+    link: "https://www.tradingview.com/symbols/SP-500/",
+    assets: ["Equities"],
+    why: "Not a leading indicator — a coincident one. But watching sector rotation within the S&P reveals where institutional money is moving.",
+    signal: { bearish: "Breakdown below 200-day MA, sector rotation to defensives", bullish: "Breadth expanding, cyclicals leading" },
+    color: "#378ADD"
+  }
+];
+
+const EVENTS = [
+  { id: "fomc", name: "FOMC Meeting / Rate Decision", category: "Fed", freq: "8x per year", importance: 5 },
+  { id: "cpi_r", name: "CPI Inflation Release", category: "Fed / Inflation", freq: "Monthly", importance: 5 },
+  { id: "pce", name: "PCE Deflator", category: "Fed / Inflation", freq: "Monthly", importance: 4 },
+  { id: "nfp", name: "Non-Farm Payrolls (NFP)", category: "Labor", freq: "Monthly (1st Friday)", importance: 5 },
+  { id: "pmi_r", name: "PMI Flash Estimates", category: "Growth", freq: "Monthly (3rd week)", importance: 4 },
+  { id: "gdp_r", name: "GDP Advance Estimate", category: "Growth", freq: "Quarterly", importance: 4 },
+  { id: "retail", name: "Retail Sales", category: "Consumer", freq: "Monthly", importance: 3 },
+  { id: "opec", name: "OPEC+ Meeting / Output Decision", category: "Commodities", freq: "Bi-annual + emergency", importance: 4 },
+  { id: "treasury", name: "Treasury Auctions (10yr, 30yr)", category: "Bonds", freq: "Weekly", importance: 3 },
+  { id: "fed_speech", name: "Fed Chair Speech / Minutes", category: "Fed", freq: "Irregular", importance: 4 },
+];
+
+const CATEGORY_COLORS = {
+  "Monetary Policy": "#639922",
+  "Inflation & Growth": "#D85A30",
+  "Credit & Liquidity": "#D4537E",
+  "Currencies": "#BA7517",
+  "Commodities": "#E07B2A",
+  "Sentiment & Risk": "#378ADD"
+};
+
+const ASSET_TAG_COLORS = {
+  "Bonds": { bg: "#EAF3DE", text: "#27500A" },
+  "Equities": { bg: "#E6F1FB", text: "#0C447C" },
+  "FX": { bg: "#FAEEDA", text: "#633806" },
+  "Commodities": { bg: "#FAECE7", text: "#712B13" },
+  "Credit": { bg: "#FBEAF0", text: "#72243E" },
+  "Real Assets": { bg: "#EEEDFE", text: "#3C3489" },
+  "Gold": { bg: "#FAEEDA", text: "#633806" },
+  "EM": { bg: "#FAECE7", text: "#712B13" },
+  "Inflation": { bg: "#FCEBEB", text: "#A32D2D" },
+};
+
+// ── Storage helpers ──────────────────────────────────────────────────────────
+
+async function loadEntries() {
+  try {
+    const r = await window.storage.get("journal_entries");
+    return r ? JSON.parse(r.value) : [];
+  } catch { return []; }
+}
+
+async function saveEntries(entries) {
+  try {
+    await window.storage.set("journal_entries", JSON.stringify(entries));
+  } catch {}
+}
+
+// ── Utility ──────────────────────────────────────────────────────────────────
+
+function weekOf(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function formatDate(iso) {
+  return new Date(iso).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
+}
+
+const MACRO_THEMES = [
+  "Risk-on / expansion", "Risk-off / contraction", "Stagflation",
+  "Disinflation / soft landing", "Recession", "Policy pivot", "Commodity supercycle", "Currency crisis", "Unknown"
+];
+
+// ── Components ───────────────────────────────────────────────────────────────
+
+function Tag({ label }) {
+  const c = ASSET_TAG_COLORS[label] || { bg: "#F1EFE8", text: "#5F5E5A" };
+  return (
+    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 100, background: c.bg, color: c.text, fontWeight: 500 }}>
+      {label}
+    </span>
+  );
+}
+
+function ImportanceDots({ n }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 2 }}>
+      {[1,2,3,4,5].map(i => (
+        <span key={i} style={{
+          width: 6, height: 6, borderRadius: "50%",
+          background: i <= n ? "#D85A30" : "var(--color-border-secondary)"
+        }} />
+      ))}
+    </span>
+  );
+}
+
+function ChartCard({ chart, compact }) {
+  const cat = CATEGORY_COLORS[chart.category] || "#888";
+  return (
+    <div style={{
+      background: "var(--color-background-primary)",
+      border: "0.5px solid var(--color-border-tertiary)",
+      borderRadius: 12,
+      padding: compact ? "12px 14px" : "16px 18px",
+      borderLeft: `3px solid ${cat}`
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)", lineHeight: 1.3 }}>{chart.name}</div>
+          <div style={{ fontSize: 11, color: cat, marginTop: 2 }}>{chart.category}</div>
+        </div>
+        <a href={chart.link} target="_blank" rel="noreferrer" style={{
+          fontSize: 11, color: "var(--color-text-info)", textDecoration: "none",
+          border: "0.5px solid var(--color-border-info)", borderRadius: 6,
+          padding: "3px 8px", whiteSpace: "nowrap", marginLeft: 8
+        }}>View →</a>
+      </div>
+      {!compact && <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8, lineHeight: 1.5 }}>{chart.description}</div>}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: compact ? 0 : 8 }}>
+        {chart.assets.map(a => <Tag key={a} label={a} />)}
+      </div>
+      {!compact && (
+        <>
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", lineHeight: 1.5, marginBottom: 6 }}>
+            <strong style={{ fontWeight: 500 }}>Why it matters:</strong> {chart.why}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#FCEBEB", color: "#A32D2D" }}>
+              ↓ {chart.signal.bearish}
+            </div>
+            <div style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#EAF3DE", color: "#27500A" }}>
+              ↑ {chart.signal.bullish}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── PAGES ────────────────────────────────────────────────────────────────────
+
+function PageCharts() {
+  const cats = [...new Set(CHARTS.map(c => c.category))];
+  const [activecat, setActivecat] = useState("All");
+  const filtered = activecat === "All" ? CHARTS : CHARTS.filter(c => c.category === activecat);
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 20, fontWeight: 500, marginBottom: 4 }}>Charts & Indicators</div>
+        <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>16 macro indicators to monitor weekly. Click "View →" to open the live chart.</div>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
+        {["All", ...cats].map(c => (
+          <button key={c} onClick={() => setActivecat(c)} style={{
+            fontSize: 12, padding: "5px 12px", borderRadius: 100, cursor: "pointer",
+            border: activecat === c ? `1.5px solid ${CATEGORY_COLORS[c] || "var(--color-border-primary)"}` : "0.5px solid var(--color-border-tertiary)",
+            background: activecat === c ? "var(--color-background-secondary)" : "transparent",
+            color: activecat === c ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+            fontWeight: activecat === c ? 500 : 400
+          }}>{c}</button>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+        {filtered.map(c => <ChartCard key={c.id} chart={c} />)}
+      </div>
+    </div>
+  );
+}
+
+function PageEvents() {
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 20, fontWeight: 500, marginBottom: 4 }}>Economic Calendar Events</div>
+        <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>Key releases to track weekly. Cross-reference with your chart observations.</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {EVENTS.map(e => (
+          <div key={e.id} style={{
+            background: "var(--color-background-primary)",
+            border: "0.5px solid var(--color-border-tertiary)",
+            borderRadius: 10, padding: "14px 16px",
+            display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap"
+          }}>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>{e.name}</div>
+              <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{e.category} · {e.freq}</div>
+            </div>
+            <ImportanceDots n={e.importance} />
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 16, fontSize: 12, color: "var(--color-text-tertiary)", lineHeight: 1.6 }}>
+        ● = importance level. Recommended tracker: <a href="https://www.forexfactory.com/calendar" target="_blank" rel="noreferrer" style={{ color: "var(--color-text-info)" }}>ForexFactory</a> · <a href="https://tradingeconomics.com/calendar" target="_blank" rel="noreferrer" style={{ color: "var(--color-text-info)" }}>TradingEconomics</a> · <a href="https://investing.com/economic-calendar/" target="_blank" rel="noreferrer" style={{ color: "var(--color-text-info)" }}>Investing.com</a>
+      </div>
+    </div>
+  );
+}
+
+const BLANK_ENTRY = {
+  date: new Date().toISOString().slice(0, 10),
+  macro_theme: "",
+  summary: "",
+  fed_notes: "",
+  chart_obs: {},
+  correlations: "",
+  thesis: "",
+  questions: "",
+  hindsight: ""
+};
+
+function PageJournal({ entries, setEntries }) {
+  const [view, setView] = useState("list"); // list | new | detail
+  const [form, setForm] = useState({ ...BLANK_ENTRY });
+  const [detailId, setDetailId] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+
+  function openNew() {
+    setForm({ ...BLANK_ENTRY, date: new Date().toISOString().slice(0, 10) });
+    setEditMode(false);
+    setView("new");
+  }
+
+  async function saveEntry() {
+    if (!form.summary.trim()) return;
+    let updated;
+    if (editMode && detailId !== null) {
+      updated = entries.map((e, i) => i === detailId ? { ...form } : e);
+    } else {
+      updated = [{ ...form, id: Date.now() }, ...entries];
+    }
+    setEntries(updated);
+    await saveEntries(updated);
+    setView("list");
+  }
+
+  async function deleteEntry(i) {
+    const updated = entries.filter((_, idx) => idx !== i);
+    setEntries(updated);
+    await saveEntries(updated);
+    setView("list");
+  }
+
+  function openDetail(i) {
+    setDetailId(i);
+    setView("detail");
+  }
+
+  function startEdit(i) {
+    setDetailId(i);
+    setForm({ ...entries[i] });
+    setEditMode(true);
+    setView("new");
+  }
+
+  const F = (field, placeholder, multiline, rows) => (
+    multiline
+      ? <textarea value={form[field] || ""} onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+          placeholder={placeholder} rows={rows || 3} style={textareaStyle} />
+      : <input value={form[field] || ""} onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+          placeholder={placeholder} style={inputStyle} />
+  );
+
+  const inputStyle = {
+    width: "100%", padding: "8px 12px", fontSize: 13,
+    border: "0.5px solid var(--color-border-tertiary)", borderRadius: 8,
+    background: "var(--color-background-secondary)", color: "var(--color-text-primary)",
+    boxSizing: "border-box", outline: "none"
+  };
+  const textareaStyle = {
+    ...inputStyle, resize: "vertical", lineHeight: 1.6, fontFamily: "inherit"
+  };
+
+  const fieldLabel = (label, hint) => (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 1 }}>{label}</div>
+      {hint && <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 4 }}>{hint}</div>}
+    </div>
+  );
+
+  if (view === "new") return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <button onClick={() => setView("list")} style={{ ...btnStyle, fontSize: 12, padding: "5px 12px" }}>← Back</button>
+        <div style={{ fontSize: 18, fontWeight: 500 }}>{editMode ? "Edit Entry" : "New Weekly Entry"}</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            {fieldLabel("Week of", "Monday of the week you're logging")}
+            <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            {fieldLabel("Macro regime", "What environment best describes this week?")}
+            <select value={form.macro_theme} onChange={e => setForm(f => ({ ...f, macro_theme: e.target.value }))} style={inputStyle}>
+              <option value="">Select…</option>
+              {MACRO_THEMES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          {fieldLabel("Weekly summary", "Key events, data releases, and market moves this week. Be factual.")}
+          {F("summary", "e.g. CPI came in hotter than expected at 3.5% vs 3.2% est. Fed Chair Powell signaled no rate cuts in H1. S&P sold off 1.8%, yields rose 15bps...", true, 4)}
+        </div>
+
+        <div>
+          {fieldLabel("Fed / policy observations", "Any Fed speak, minutes, data that shifts your rate expectations?")}
+          {F("fed_notes", "e.g. FOMC minutes revealed hawkish tilt, 2 members wanted another hike...", true, 3)}
+        </div>
+
+        <div>
+          {fieldLabel("Chart observations", "What did your key charts do this week? Note direction and magnitude.")}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
+            {CHARTS.map(c => (
+              <div key={c.id} style={{
+                background: "var(--color-background-primary)",
+                border: "0.5px solid var(--color-border-tertiary)",
+                borderRadius: 8, padding: "8px 10px"
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 4, color: CATEGORY_COLORS[c.category] }}>{c.name}</div>
+                <input
+                  value={(form.chart_obs && form.chart_obs[c.id]) || ""}
+                  onChange={e => setForm(f => ({ ...f, chart_obs: { ...f.chart_obs, [c.id]: e.target.value } }))}
+                  placeholder="e.g. rose 12bps, broke above..."
+                  style={{ ...inputStyle, fontSize: 11, padding: "5px 8px" }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          {fieldLabel("Correlations observed", "Did events cause expected moves? Any surprises? Build your cause-effect map.")}
+          {F("correlations", "e.g. Hot CPI → yields rose (expected) → DXY strengthened (expected) → gold fell (expected) → copper also fell (interesting — is market pricing in demand destruction?)...", true, 4)}
+        </div>
+
+        <div>
+          {fieldLabel("Forward thesis", "Given current conditions, what is your base case for the next 2–4 weeks?")}
+          {F("thesis", "e.g. If PMI continues declining and credit spreads widen, expect equity weakness. Watch whether Fed pivots language...", true, 3)}
+        </div>
+
+        <div>
+          {fieldLabel("Open questions", "What don't you understand yet? What would change your view?")}
+          {F("questions", "e.g. Why did gold fall despite DXY staying flat? Does this mean real rates are being repriced?...", true, 3)}
+        </div>
+
+        <div>
+          {fieldLabel("Hindsight review", "(Fill this in next week) Was your thesis right? What did you miss?")}
+          {F("hindsight", "Leave blank and return to complete after the next week plays out...", true, 3)}
+        </div>
+
+        <button onClick={saveEntry} style={{
+          background: "#D85A30", color: "#fff", border: "none",
+          borderRadius: 8, padding: "10px 24px", fontSize: 13, fontWeight: 500,
+          cursor: "pointer", alignSelf: "flex-start"
+        }}>
+          Save Entry
+        </button>
+      </div>
+    </div>
+  );
+
+  if (view === "detail" && detailId !== null) {
+    const e = entries[detailId];
+    if (!e) { setView("list"); return null; }
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+          <button onClick={() => setView("list")} style={{ ...btnStyle, fontSize: 12, padding: "5px 12px" }}>← Back</button>
+          <div style={{ flex: 1, fontSize: 18, fontWeight: 500 }}>Week of {formatDate(e.date)}</div>
+          <button onClick={() => startEdit(detailId)} style={{ ...btnStyle, fontSize: 12, padding: "5px 12px" }}>Edit</button>
+          <button onClick={() => deleteEntry(detailId)} style={{ ...btnStyle, fontSize: 12, padding: "5px 12px", color: "#A32D2D", borderColor: "#F09595" }}>Delete</button>
+        </div>
+        {e.macro_theme && (
+          <div style={{ display: "inline-block", fontSize: 12, padding: "4px 12px", borderRadius: 100, background: "#FAEEDA", color: "#633806", marginBottom: 16 }}>
+            {e.macro_theme}
+          </div>
+        )}
+        {[
+          ["Summary", e.summary],
+          ["Fed / Policy Notes", e.fed_notes],
+          ["Correlations Observed", e.correlations],
+          ["Forward Thesis", e.thesis],
+          ["Open Questions", e.questions],
+          ["Hindsight Review", e.hindsight],
+        ].filter(([_, v]) => v).map(([label, val]) => (
+          <div key={label} style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 13, color: "var(--color-text-primary)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{val}</div>
+          </div>
+        ))}
+        {e.chart_obs && Object.keys(e.chart_obs).filter(k => e.chart_obs[k]).length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: 8 }}>Chart Observations</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 6 }}>
+              {CHARTS.filter(c => e.chart_obs[c.id]).map(c => (
+                <div key={c.id} style={{
+                  background: "var(--color-background-secondary)",
+                  border: "0.5px solid var(--color-border-tertiary)",
+                  borderRadius: 8, padding: "8px 10px"
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: CATEGORY_COLORS[c.category], marginBottom: 3 }}>{c.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{e.chart_obs[c.id]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // LIST
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 500, marginBottom: 4 }}>Journal Entries</div>
+          <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{entries.length} entries logged</div>
+        </div>
+        <button onClick={openNew} style={{
+          background: "#D85A30", color: "#fff", border: "none",
+          borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 500, cursor: "pointer"
+        }}>+ New Entry</button>
+      </div>
+      {entries.length === 0 ? (
+        <div style={{
+          background: "var(--color-background-secondary)", borderRadius: 12,
+          padding: "40px 24px", textAlign: "center"
+        }}>
+          <div style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 8 }}>No entries yet.</div>
+          <div style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>Start your first weekly review to begin building your macro intuition.</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {entries.map((e, i) => (
+            <div key={e.id || i} onClick={() => openDetail(i)} style={{
+              background: "var(--color-background-primary)",
+              border: "0.5px solid var(--color-border-tertiary)",
+              borderRadius: 10, padding: "14px 16px", cursor: "pointer",
+              transition: "border-color 0.15s"
+            }} onMouseEnter={ev => ev.currentTarget.style.borderColor = "var(--color-border-primary)"}
+               onMouseLeave={ev => ev.currentTarget.style.borderColor = "var(--color-border-tertiary)"}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 3 }}>Week of {formatDate(e.date)}</div>
+                  {e.macro_theme && (
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 100, background: "#FAEEDA", color: "#633806" }}>
+                      {e.macro_theme}
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>→</span>
+              </div>
+              {e.summary && (
+                <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 8, lineHeight: 1.5,
+                  overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                  {e.summary}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const btnStyle = {
+  background: "transparent", border: "0.5px solid var(--color-border-tertiary)",
+  borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer",
+  color: "var(--color-text-primary)"
+};
+
+function PageGuide() {
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 20, fontWeight: 500, marginBottom: 4 }}>How to Use This Journal</div>
+        <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>The macro analyst's weekly process — from data to insight.</div>
+      </div>
+
+      {[
+        {
+          step: "1",
+          title: "Monday: Set up your watchlist",
+          color: "#378ADD",
+          items: [
+            "Check the economic calendar for the week (ForexFactory / TradingEconomics)",
+            "Note which major data releases are due: CPI, NFP, FOMC, PMI",
+            "Record what the consensus estimate is for each — the market reaction is about the surprise, not the number"
+          ]
+        },
+        {
+          step: "2",
+          title: "Throughout the week: Log chart movements",
+          color: "#639922",
+          items: [
+            "Each day, glance at DXY, VIX, 10yr yield, copper, and crude — your 5 pulse-check indicators",
+            "Note direction and magnitude: 'DXY rose 0.4%, broke above 104 resistance'",
+            "Don't interpret yet — just observe and record"
+          ]
+        },
+        {
+          step: "3",
+          title: "Friday: Write your weekly entry",
+          color: "#D85A30",
+          items: [
+            "Fill in the Journal form: summary, Fed notes, chart observations",
+            "Build your correlations log: 'Hot CPI → yields up → DXY up → gold down'",
+            "Write your forward thesis and open questions while the week is fresh"
+          ]
+        },
+        {
+          step: "4",
+          title: "Following Friday: Hindsight review",
+          color: "#BA7517",
+          items: [
+            "Open last week's entry and fill in the Hindsight section",
+            "Was your thesis correct? If not, what did you miss?",
+            "Over time this becomes your cause-effect pattern library"
+          ]
+        }
+      ].map(s => (
+        <div key={s.step} style={{
+          background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)",
+          borderRadius: 12, padding: "16px 18px", marginBottom: 12
+        }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: "50%", background: s.color,
+              color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 13, fontWeight: 500, flexShrink: 0
+            }}>{s.step}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>{s.title}</div>
+              {s.items.map((item, i) => (
+                <div key={i} style={{ fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.6, marginBottom: 4, paddingLeft: 12, borderLeft: `2px solid ${s.color}30` }}>
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <div style={{
+        background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)",
+        borderRadius: 12, padding: "16px 18px", marginTop: 4
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>The 5 pulse-check indicators (check daily, takes 3 minutes)</div>
+        {[
+          ["DXY", "Dollar strength — the global liquidity barometer", "#BA7517"],
+          ["10yr Treasury yield", "Risk-free rate direction — affects all valuations", "#639922"],
+          ["VIX", "Fear gauge — are markets calm or panicking?", "#378ADD"],
+          ["Copper", "Real economic demand — is the world growing?", "#D85A30"],
+          ["WTI Crude", "Inflation input + geopolitical risk proxy", "#D85A30"],
+        ].map(([name, desc, col]) => (
+          <div key={name} style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: col, flexShrink: 0 }} />
+            <div>
+              <span style={{ fontSize: 12, fontWeight: 500 }}>{name}</span>
+              <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}> — {desc}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{
+        background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)",
+        borderRadius: 12, padding: "16px 18px", marginTop: 12
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>The macro reading order (weekly deep dive)</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.8 }}>
+          <strong style={{ fontWeight: 500 }}>1. Fed policy</strong> → sets the cost of money<br />
+          <strong style={{ fontWeight: 500 }}>2. Yield curve + real rates</strong> → how is policy transmitting?<br />
+          <strong style={{ fontWeight: 500 }}>3. Credit spreads + FCI</strong> → is liquidity tightening in the real economy?<br />
+          <strong style={{ fontWeight: 500 }}>4. Inflation + PMI</strong> → what do fundamentals say about direction?<br />
+          <strong style={{ fontWeight: 500 }}>5. DXY + CNY</strong> → where is global capital flowing?<br />
+          <strong style={{ fontWeight: 500 }}>6. Copper + oil + gold</strong> → what are hard assets pricing in?<br />
+          <strong style={{ fontWeight: 500 }}>7. VIX + equity breadth</strong> → what is sentiment pricing in?
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+
+export default function App() {
+  const [page, setPage] = useState("guide");
+  const [entries, setEntries] = useState([]);
+
+  useEffect(() => {
+    loadEntries().then(setEntries);
+  }, []);
+
+  const navItems = [
+    { id: "guide", label: "Guide" },
+    { id: "charts", label: "Charts" },
+    { id: "events", label: "Events" },
+    { id: "journal", label: "Journal" },
+  ];
+
+  return (
+    <div style={{ fontFamily: "var(--font-sans)", color: "var(--color-text-primary)", maxWidth: 860, margin: "0 auto", padding: "0 0 40px" }}>
+      {/* Header */}
+      <div style={{
+        borderBottom: "0.5px solid var(--color-border-tertiary)",
+        padding: "16px 0 12px", marginBottom: 24
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", color: "var(--color-text-tertiary)", textTransform: "uppercase", marginBottom: 4 }}>
+          Macro Journal
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 500, lineHeight: 1.2, marginBottom: 12 }}>
+          Global Macro Trading Journal
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {navItems.map(n => (
+            <button key={n.id} onClick={() => setPage(n.id)} style={{
+              fontSize: 13, padding: "6px 16px", borderRadius: 8, cursor: "pointer",
+              border: page === n.id ? "1px solid var(--color-border-primary)" : "0.5px solid transparent",
+              background: page === n.id ? "var(--color-background-secondary)" : "transparent",
+              color: page === n.id ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+              fontWeight: page === n.id ? 500 : 400
+            }}>{n.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {page === "guide" && <PageGuide />}
+      {page === "charts" && <PageCharts />}
+      {page === "events" && <PageEvents />}
+      {page === "journal" && <PageJournal entries={entries} setEntries={setEntries} />}
+    </div>
+  );
+}
