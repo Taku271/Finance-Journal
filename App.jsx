@@ -1,6 +1,4 @@
-<script>
-  
-  import { useState, useEffect } from "react";
+ import { useState, useEffect } from "react";
 
 // ── Data ────────────────────────────────────────────────────────────────────
 
@@ -819,4 +817,3 @@ export default function App() {
   );
 }
 
-</script>
